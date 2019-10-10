@@ -111,9 +111,24 @@ def treinamento(clf, dataTreino):
     print("Step do treinamento: ", clf)
     return clf
 
+def calcSimItem(x, y):
+    item = 0
+    if((x/y) < 1):
+        item = x/y
+    elif((x/y) > 1):
+        item = (y/x)
+    else:
+        item = 1
+    return item
 
 def similaridade(x, option):
-    return cosine_similarity(option, x).mean()
+    x = [x['Plataforma'], x['Genero']]
+    sim = 0
+    for item in option:
+        item1 = calcSimItem(x[0], item[0])
+        item2 = calcSimItem(x[1], item[1])
+        return (item1+item2)/2
+    return sim
 
 
 def salvarAgrupamento(row, agrup):
@@ -131,7 +146,7 @@ def salvarAgrupamento(row, agrup):
 print("Inicio do processamento: ", time.strftime("%H:%M:%S"))
 p = 0
 dataTreino = np.array(pd.read_csv(
-    'dados/treino.csv').loc[0:, ['Genero', 'Plataforma']].values)
+    'dados/treino_sem_nulos.csv').loc[0:, ['Genero', 'Plataforma']].values)
 clf = AffinityPropagation(affinity='euclidean', convergence_iter=15,
                           copy=False, damping=0.5, max_iter=200, preference=None, verbose=False)
 timeStart = time.strftime("%H:%M:%S")
@@ -139,12 +154,12 @@ clf.fit(dataTreino)
 clfGlobal = clf
 cols = ['Nome', 'Plataforma', 'Ano de lancamento', 'Genero', 'Publicadora',
         'Vendas globais', 'Desenvolvedora', 'Classificacao', 'Media de pontuacao', 'Agrupamento']
-teste = pd.read_csv('dados/teste.csv')
+teste = pd.read_csv('dados/teste_sem_nulos.csv')
 teste['Agrupamento'] = teste.apply(lambda row: predicao(
     [row['Plataforma'], row['Genero']], clf), axis=1)
 testeGlobal = teste
 pd.DataFrame(data=teste, columns=cols).to_csv(
-    r'dados/teste.csv', sep=',', index=False)
+    r'dados/teste_sem_nulos.csv', sep=',', index=False)
 
 timeEnd = time.strftime("%H:%M:%S")
 # Validando modelo
@@ -175,23 +190,34 @@ def probe():
 def search(name):
     lista = []
     for i, row in teste[teste['Nome'].str.contains(name)].iterrows():
-        lista.append({'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],
-                      'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento']})
+        lista.append({'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento']})
     return jsonify(lista), 200
 
 # Recomendação de jogos
 @app.route('/recomendation', methods=['POST'])
 def recomendation():
     data = request.get_json()
-    arrayAgrup = clf.predict(data)
-    resultado = appendCluster(teste, arrayAgrup)
-    resultado['Similaridade'] = resultado.apply(lambda row: similaridade(
-        [[row['Plataforma'], row['Genero']]], data), axis=1)
-    lista = []
-    for i, row in resultado.iterrows():
-        lista.append({'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],
-                      'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento'], 'similaridade': row['Similaridade']})
-    return jsonify(lista), 200
+    if(len(data) == 0):
+        print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ---- Size = 0 ----")
+        resultado = teste.sort_values(by=['Vendas globais'], ascending=False)
+        lista = []
+        for i, row in resultado.iterrows():
+            lista.append({'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],
+                        'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento']})
+        return jsonify(lista), 200
+    else:
+        print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ---- Size > 0 ----")
+        # data = request.get_json()
+        arrayAgrup = clf.predict(data)
+        resultado = appendCluster(teste, arrayAgrup)
+        resultado['Similaridade'] = resultado.apply(lambda row: similaridade(
+            row, data), axis=1)
+        resultado = resultado.sort_values(by=['Similaridade'], ascending=False)
+        lista = []
+        for i, row in resultado.iterrows():
+            lista.append({'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],
+                        'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento'], 'similaridade': row['Similaridade']})
+        return jsonify(lista), 200
 
 # Avaliação da recomendação
 @app.route('/recomendation/evaluation', methods=['POST'])

@@ -113,12 +113,22 @@ def treinamento(clf, dataTreino):
 
 def calcSimItem(x, y):
     item = 0
+    # print("### X: ", x)
+    # print("### Y: ", y)
+    if(x == 0):
+        # print("################################################### X == ZERO")
+        x = 0.0000000000000001
+    if(y == 0):
+        # print("################################################### y == ZERO")
+        y = 0.0000000000000001
+
     if((x/y) < 1):
         item = x/y
     elif((x/y) > 1):
         item = (y/x)
     else:
         item = 1
+    # print("########### Item: ", item)
     return item
 
 def similaridade(x, option):
@@ -127,26 +137,26 @@ def similaridade(x, option):
     for item in option:
         item1 = calcSimItem(x[0], item[0])
         item2 = calcSimItem(x[1], item[1])
-        return (item1+item2)/2
-    return sim
+        sim = sim + ((item1+item2)/2)
+    return sim/len(option)
 
 
-def salvarAgrupamento(row, agrup):
-    db = pymysql.connect("localhost", "root", "arkannus34k",
-                         "sistema_recomendacao")
-    cursor = db.cursor()
-    nome = "'" + str(row['Nome']).replace("'", "")+"'"
-    cursor.execute(
-        f"INSERT INTO predicoes (Nome, Plataforma, Ano_de_lancamento, Genero, Publicadora, Vendas_globais, Desenvolvedora, Classificacao, Media_de_pontuacao, Agrupamento) VALUES ({nome},{str(row['Plataforma'])},{str(row['Ano de lancamento'])},{str(row['Genero'])},{str(row['Publicadora'])},{str(row['Vendas globais'])},{str(row['Desenvolvedora'])},{str(row['Classificacao'])},{str(row['Media de pontuacao'])},{str(agrup)});")
-    db.commit()
-    db.close()
+# def salvarAgrupamento(row, agrup):
+#     db = pymysql.connect("localhost", "root", "arkannus34k",
+#                          "sistema_recomendacao")
+#     cursor = db.cursor()
+#     nome = "'" + str(row['Nome']).replace("'", "")+"'"
+#     cursor.execute(
+#         f"INSERT INTO predicoes (Nome, Plataforma, Ano_de_lancamento, Genero, Publicadora, Vendas_globais, Desenvolvedora, Classificacao, Media_de_pontuacao, Agrupamento) VALUES ({nome},{str(row['Plataforma'])},{str(row['Ano de lancamento'])},{str(row['Genero'])},{str(row['Publicadora'])},{str(row['Vendas globais'])},{str(row['Desenvolvedora'])},{str(row['Classificacao'])},{str(row['Media de pontuacao'])},{str(agrup)});")
+#     db.commit()
+#     db.close()
 
 
 # Treinamento
 print("Inicio do processamento: ", time.strftime("%H:%M:%S"))
 p = 0
 dataTreino = np.array(pd.read_csv(
-    'dados/treino_sem_nulos.csv').loc[0:, ['Genero', 'Plataforma']].values)
+    'dados/treino_final.csv').loc[0:, ['Genero', 'Plataforma']].values)
 clf = AffinityPropagation(affinity='euclidean', convergence_iter=15,
                           copy=False, damping=0.5, max_iter=200, preference=None, verbose=False)
 timeStart = time.strftime("%H:%M:%S")
@@ -154,12 +164,12 @@ clf.fit(dataTreino)
 clfGlobal = clf
 cols = ['Nome', 'Plataforma', 'Ano de lancamento', 'Genero', 'Publicadora',
         'Vendas globais', 'Desenvolvedora', 'Classificacao', 'Media de pontuacao', 'Agrupamento']
-teste = pd.read_csv('dados/teste_sem_nulos.csv')
+teste = pd.read_csv('dados/teste_final.csv')
 teste['Agrupamento'] = teste.apply(lambda row: predicao(
     [row['Plataforma'], row['Genero']], clf), axis=1)
-testeGlobal = teste
+teste = teste.drop_duplicates()
 pd.DataFrame(data=teste, columns=cols).to_csv(
-    r'dados/teste_sem_nulos.csv', sep=',', index=False)
+    r'dados/teste_final.csv', sep=',', index=False)
 
 timeEnd = time.strftime("%H:%M:%S")
 # Validando modelo
@@ -172,11 +182,8 @@ qtdeCluster = teste['Agrupamento'].nunique()
 result = pd.DataFrame(data=[], columns=colunas)
 result = result.append(pd.DataFrame(
     data=[[p, pureza, entropia, timeStart, timeEnd, qtdeCluster, str(clf.get_params())]], columns=colunas))
-print("##########################################")
-print("Resultado: ", result)
-print("##########################################")
-avaliacao = pd.DataFrame(
-    data=[], columns={'Escolhas de jogos', 'Recomendações', 'Curtida'})
+
+# avaliacao = pd.DataFrame(data=[], columns={'Escolhas de jogos', 'Recomendações', 'Curtida'})
 print("Término do processamento: ", time.strftime("%H:%M:%S"))
 
 # Rotas
@@ -189,7 +196,7 @@ def probe():
 @app.route('/search/<name>', methods=['GET'])
 def search(name):
     lista = []
-    for i, row in teste[teste['Nome'].str.contains(name)].iterrows():
+    for i, row in teste[teste['Nome'].str.contains(name, case=False)].iterrows():
         lista.append({'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento']})
     return jsonify(lista), 200
 
@@ -197,27 +204,47 @@ def search(name):
 @app.route('/recomendation', methods=['POST'])
 def recomendation():
     data = request.get_json()
-    if(len(data) == 0):
-        print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ---- Size = 0 ----")
-        resultado = teste.sort_values(by=['Vendas globais'], ascending=False)
+    if(len(data) < 1):
+        # print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ---- Size = 0 ----")
+        resultado = []
+        resultadoFinal = teste.sort_values(by=['Vendas globais'], ascending=False).iloc[0:10, 0:]
         lista = []
-        for i, row in resultado.iterrows():
-            lista.append({'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],
-                        'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento']})
+        # print("XXXXXXXXXXXXXXXXXXXXX RESULTADO:\n")
+        for i, row in resultadoFinal.iterrows():
+            game = {'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],
+                        'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento']}
+            if game not in lista:
+                lista.append(game)
         return jsonify(lista), 200
     else:
-        print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ---- Size > 0 ----")
+        # print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ---- Size > 0 ----")
         # data = request.get_json()
         arrayAgrup = clf.predict(data)
+        resultado = []
         resultado = appendCluster(teste, arrayAgrup)
         resultado['Similaridade'] = resultado.apply(lambda row: similaridade(
             row, data), axis=1)
-        resultado = resultado.sort_values(by=['Similaridade'], ascending=False)
-        lista = []
-        for i, row in resultado.iterrows():
-            lista.append({'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],
-                        'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento'], 'similaridade': row['Similaridade']})
-        return jsonify(lista), 200
+        resultado = resultado.drop_duplicates()
+        if(resultado.size < 10):
+            resultado = resultado.append(teste.sort_values(by=['Vendas globais'], ascending=False)).iloc[0:10-resultado.size, 0:]
+            lista = []
+            # print("XXXXXXXXXXXXXXXXXXXXX RESULTADO IF:\n")
+            for i, row in resultado.iterrows():
+                game = {'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],
+                            'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento'], 'similaridade': row['Similaridade']}
+                if game not in lista:
+                    lista.append(game)
+            return jsonify(lista), 200
+        else:
+            resultado = resultado.sort_values(by=['Similaridade'], ascending=False).iloc[0:10, 0:]
+            lista = []
+            # print("XXXXXXXXXXXXXXXXXXXXX RESULTADO ELSE:\n", resultado)
+            for i, row in resultado.iterrows():
+                game = {'nome': row['Nome'], 'plataforma': row['Plataforma'], 'ano': row['Ano de lancamento'], 'genero': row['Genero'], 'publicadora': row['Publicadora'],
+                            'vendas': row['Vendas globais'], 'desenvolvedora': row['Desenvolvedora'], 'classificacao': row['Classificacao'], 'pontuacao': row['Media de pontuacao'], 'agrupamento': row['Agrupamento'], 'similaridade': row['Similaridade']}
+                if game not in lista:
+                    lista.append(game)
+            return jsonify(lista), 200
 
 # Avaliação da recomendação
 @app.route('/recomendation/evaluation', methods=['POST'])
@@ -226,8 +253,12 @@ def evaluation():
     option = data['option']
     recomendation = data['recomendation']
     nota = data['nota']
-    avaliacao.append(pd.DataFrame(data=[{str(option), str(recomendation), str(
-        nota)}], columns={'Escolhas de jogos', 'Recomendações', 'Curtida'}))
+
+    # avaliacao.append(pd.DataFrame(data=[{str(option), str(recomendation), str(
+    #     nota)}], columns={'Escolhas de jogos', 'Recomendações', 'Curtida'})).to_csv(r'dados/avaliacao.csv')
+    # avaliacao=pd.DataFrame(data={}, columns={'Curtida', 'Escolhas de jogos', 'Recomendacoes'})
+    # pd.read_csv(r'dados/avaliacao.csv').append(pd.DataFrame(data={{str(nota)},{str(option)},{str(recomendation)}}, columns={'Curtida','Escolhas de jogos','Recomendacoes'})).to_csv(r'dados/avaliacao.csv', index=False)
+    pd.read_csv(r'dados/avaliacao.csv').append(pd.DataFrame(data={'Curtida':[str(nota)],'Escolhas de jogos':[str(option)],'Recomendacoes':[str(recomendation)]})).to_csv(r'dados/avaliacao.csv', index=False)
     return jsonify(nota), 200
 
 
